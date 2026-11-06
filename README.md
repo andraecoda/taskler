@@ -1,36 +1,76 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Taskler Frontend — Auth + Profile MVP
 
-## Getting Started
+Next.js (App Router) frontend for the Task-Based Earning & Rewards Platform. This package
+covers exactly what `taskler/backend` (Phase 1 — Foundation) supports today:
+authentication and a real user profile. There is deliberately no navigation, dashboard
+widgets, or pages for packages/tasks/wallet/goals/marketplace/withdrawals/referrals — none
+of that exists in the backend yet, and building UI for it now would mean dead links or
+fabricated data.
 
-First, run the development server:
+## Architecture
+
+- **Token handling**: the refresh token lives only in an httpOnly/secure/sameSite cookie,
+  set by a few Next.js Route Handlers (`src/app/api/auth/{login,refresh,logout}/route.ts`)
+  that proxy to the backend. The short-lived access token is kept in memory only
+  (`src/lib/auth-context.tsx`) — it is never written to `localStorage`/`sessionStorage`.
+  Every other authenticated call (`GET/PATCH /users/me`) goes straight to the backend
+  cross-origin, using the in-memory access token, relying on the backend's CORS config.
+- **Registration/verification/password-reset** calls go directly to the backend
+  (`src/features/auth/api.ts`) since they don't touch the refresh-token cookie — no need to
+  proxy them through Next.js.
+- **`src/proxy.ts`** (Next.js 16's replacement for `middleware.ts`) redirects based on
+  refresh-token-cookie *presence* only — a UX convenience. The backend remains the real
+  authorization boundary; a stale/expired cookie just makes the client-side silent-refresh
+  fail and `AuthProvider` redirect to `/login` itself.
+- **Types** in `src/lib/api-types.ts` and `src/features/auth/types.ts` mirror the backend's
+  response envelope and entities field-for-field. They're duplicated, not shared, since
+  frontend/backend are separate npm projects by design — keep them in sync manually if the
+  backend contract changes.
+
+## Getting started
+
+Requires the backend running locally (see `../backend/README.md`) — set
+`NEXT_PUBLIC_API_URL` below to point at it.
 
 ```bash
+cp .env.local.example .env.local
+# edit .env.local if the backend isn't at the default http://localhost:3000/api
+
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+If port 3000 is taken (e.g. the backend is on it), Next.js picks the next free port
+automatically — check the backend's `CORS_ORIGIN` matches whatever port the frontend
+actually starts on.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Scripts
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Script | Purpose |
+| --- | --- |
+| `npm run dev` | Run with hot reload |
+| `npm run build` | Production build |
+| `npm run start` | Run the production build |
+| `npm run lint` | ESLint |
 
-## Learn More
+## Structure
 
-To learn more about Next.js, take a look at the following resources:
+```
+src/
+  app/
+    (auth)/          login, register, verify-email, forgot-password, reset-password
+    (dashboard)/     protected layout + the profile page
+    api/auth/        login/refresh/logout route handlers (httpOnly cookie management)
+  components/ui/     Button, Input, FormField, Card, Alert, Spinner
+  features/auth/     api calls, zod schemas, types
+  lib/               auth-context, api-client, error-message, server-config
+  providers/         TanStack Query + AuthProvider wiring
+  proxy.ts           cookie-presence-based route redirects
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Verified
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Registration → email verification (via the backend's console-logged link) → login →
+profile view/edit with persistence → logout → protected-route redirect → forgot/reset
+password round-trip, all driven end-to-end in a real headless-Chromium browser session
+against the live backend + MySQL. No token ever appears in `localStorage`/`sessionStorage`.
